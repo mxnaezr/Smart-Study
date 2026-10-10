@@ -53,12 +53,12 @@ export default function Dashboard() {
       const name = user?.name?.trim();
       setUserName(name || "Student");
 
-      if (!user?.id) {
+      if (!user) {
         setError("We couldn't find your signed-in profile. Please sign in again to sync your study data.");
         return;
       }
 
-      const savedStatistics = await getStudyStatistics(user.id);
+      const savedStatistics = await getStudyStatistics();
       setStatisticsData(savedStatistics);
       setHasLoaded(true);
       setError(null);
