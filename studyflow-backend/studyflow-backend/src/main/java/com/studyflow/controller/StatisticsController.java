@@ -2,6 +2,11 @@ package com.studyflow.controller;
 
 import com.studyflow.entity.StudySession;
 import com.studyflow.repository.StudySessionRepository;
+import com.studyflow.repository.UserRepository;
+import com.studyflow.entity.User;
+import org.springframework.security.core.Authentication;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,18 +21,26 @@ import java.util.*;
 public class StatisticsController {
 
     private final StudySessionRepository studySessionRepository;
+    private final UserRepository userRepository;
 
-    public StatisticsController(StudySessionRepository studySessionRepository) {
+    public StatisticsController(
+            StudySessionRepository studySessionRepository,
+            UserRepository userRepository
+    ) {
         this.studySessionRepository = studySessionRepository;
+        this.userRepository = userRepository;
     }
 
     /**
      * Returns statistics calculated from the signed-in user's saved study sessions.
      * The existing root endpoint is retained for compatibility with older clients.
      */
-    @GetMapping("/user/{userId}")
-    public ResponseEntity<Map<String, Object>> getUserStatistics(@PathVariable Long userId) {
-        List<StudySession> sessions = studySessionRepository.findByUserId(userId);
+    @GetMapping({ "", "/me" })
+    public ResponseEntity<Map<String, Object>> getCurrentUserStatistics(Authentication authentication) {
+        User user = userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "User profile not found"));
+        List<StudySession> sessions = studySessionRepository.findByUserId(user.getId());
         LocalDate today = LocalDate.now();
         LocalDateTime now = LocalDateTime.now();
         LocalDate weekStart = today.minusDays(6);
@@ -149,13 +162,4 @@ public class StatisticsController {
         }
     }
 
-    @GetMapping
-    public ResponseEntity<?> getStatistics(@RequestParam(required = false) Long userId) {
-        if (userId == null) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "message", "Provide userId to retrieve study statistics."
-            ));
-        }
-        return getUserStatistics(userId);
-    }
 }
