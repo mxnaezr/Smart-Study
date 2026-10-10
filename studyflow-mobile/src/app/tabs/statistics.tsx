@@ -33,13 +33,13 @@ export default function Statistics() {
   const loadStatistics = useCallback(async () => {
     try {
       const user = await getCurrentUser();
-      if (!user?.id) {
+      if (!user) {
         setError("Please sign in again to view your study statistics.");
         setStatistics(null);
         return;
       }
 
-      const result = await getStudyStatistics(user.id);
+      const result = await getStudyStatistics();
       setStatistics(result);
       setError(null);
     } catch (loadError) {
