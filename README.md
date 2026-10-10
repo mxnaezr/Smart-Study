@@ -1,23 +1,38 @@
-# StudyFlow
+# Smart Study
 
-> Study better, together.
+> Plan smarter. Focus better. Learn together.
 
-StudyFlow is a collaborative mobile study companion that helps students plan focused sessions, monitor progress, and stay connected with classmates through shared study rooms and real-time chat.
+**Smart Study** is a mobile study companion designed to help students organize their learning, build consistent study habits, and stay motivated. It brings study-session planning, progress tracking, and collaborative learning into one place.
 
-<!-- Add a screenshot or short demo GIF here when the app is ready. -->
-<!-- ![StudyFlow app preview](./assets/preview.png) -->
+The project is being developed with a focus on making study time more structured, productive, and social.
 
-## Why StudyFlow?
+## Why Smart Study?
 
-Studying is easier when structure and community work together. StudyFlow brings both into one simple place—so you can focus on your goals while learning alongside friends.
+Students often struggle to balance subjects, deadlines, distractions, and independent study. Smart Study aims to make that process easier by combining personal study tools with ways to learn alongside friends and classmates.
 
-## Features
+## Core Features
 
-- **Focused study sessions** — Create and manage sessions around your schedule.
-- **Progress tracking** — Keep a clear view of your study habits and milestones.
-- **Collaborative study rooms** — Join friends and classmates in shared online spaces.
-- **Real-time chat** — Discuss topics, share encouragement, and stay accountable.
-- **Mobile-first experience** — Designed for studying wherever you are.
+- **Focused study sessions** — Create and manage study sessions around your schedule.
+- **Progress tracking** — Keep track of study habits, milestones, and completed goals.
+- **Collaborative study rooms** — Study alongside friends and classmates in shared online spaces.
+- **Real-time chat** — Discuss topics, exchange encouragement, and stay accountable.
+- **Mobile-first experience** — Access study tools from a mobile device.
+
+## Proposed Smart Features
+
+These are planned enhancements and should not be considered implemented until they are built and tested.
+
+- **Smart study planner** — Help students organize subjects, deadlines, and available study time into a practical schedule.
+- **Focus timer** — Support focused work intervals and planned breaks.
+- **Study analytics** — Summarize study time, consistency, and progress toward goals.
+- **Achievements and streaks** — Encourage consistent habits with milestones, badges, and streak tracking.
+- **Shared study goals** — Let classmates coordinate sessions and encourage one another.
+
+## Technology
+
+- **Mobile app:** Expo / React Native
+- **Language:** TypeScript
+- **Backend:** See the `studyflow-backend` directory for the current server-side implementation.
 
 ## Getting Started
 
@@ -29,6 +44,8 @@ Studying is easier when structure and community work together. StudyFlow brings 
 
 ### Installation
 
+Clone the repository and enter the mobile application directory:
+
 ```bash
 git clone https://github.com/mxnaezr/StudyFlow-App.git
 cd StudyFlow-App/studyflow-mobile
@@ -36,32 +53,33 @@ npm install
 npx expo start
 ```
 
-Then scan the QR code with Expo Go, or open the project in an Android or iOS simulator.
+Scan the QR code with Expo Go, or open the app in a compatible Android or iOS simulator.
 
 ## Project Structure
 
 ```text
 StudyFlow-App/
 ├── studyflow-mobile/       # Expo / React Native mobile application
-├── studyflow-backend/      # API and server-side services
+├── studyflow-backend/      # Backend services
 └── README.md
 ```
 
 ## Roadmap
 
-- [ ] Publish the first mobile beta
-- [ ] Add richer session analytics
-- [ ] Enable study-room notifications
-- [ ] Add a public demo and product screenshots
+- [ ] Refine the core mobile study experience
+- [ ] Improve study progress summaries
+- [ ] Explore a personalized study-planning feature
+- [ ] Add study-session notifications
+- [ ] Add app screenshots or a demo when available
 
 ## Contributing
 
-Contributions, ideas, and feedback are welcome. Please open an issue to discuss a proposed change before submitting a pull request.
+Ideas and feedback are welcome. Open an issue to discuss a proposed change before submitting a pull request.
 
 ## License
 
-This project does not yet include a license. Add one before accepting external contributions.
+No license is currently included. A license should be added before the project is distributed or accepts external contributions.
 
 ---
 
-Built for students who do their best work together.
+**Smart Study — Plan smarter. Focus better. Learn together.**
