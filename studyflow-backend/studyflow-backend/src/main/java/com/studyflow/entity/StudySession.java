@@ -27,7 +27,9 @@ public class StudySession {
     @Column(name = "duration_minutes", nullable = false)
     private Integer durationMinutes = 0;
 
-    @Column(columnDefinition = "TEXT")
+    // CLOB is Oracle-compatible for longer notes.
+    @Lob
+    @Column(name = "notes")
     private String notes;
 
     @ManyToOne(fetch = FetchType.LAZY)
