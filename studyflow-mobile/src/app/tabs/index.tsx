@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -12,38 +12,8 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 import { getCurrentUser } from "../../services/authService";
-import {
-  getStudySessions,
-  StudySession,
-} from "../../services/studySessionService";
+import { getStudyStatistics, StudyStatistics } from "../../services/statisticsService";
 
-type DailyActivity = {
-  key: string;
-  label: string;
-  minutes: number;
-};
-
-function getSessionMinutes(session: StudySession): number {
-  const savedMinutes = Number(
-    session.durationMinutes ?? session.duration ?? 0
-  );
-
-  if (Number.isFinite(savedMinutes) && savedMinutes > 0) {
-    return Math.round(savedMinutes);
-  }
-
-  // Older sessions may have timestamps but no saved duration.
-  if (session.startTime && session.endTime) {
-    const start = new Date(session.startTime).getTime();
-    const end = new Date(session.endTime).getTime();
-
-    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
-      return Math.round((end - start) / 60000);
-    }
-  }
-
-  return 0;
-}
 
 function dateKey(date: Date): string {
   const year = date.getFullYear();
@@ -70,7 +40,7 @@ function getGreeting(): string {
 }
 
 export default function Dashboard() {
-  const [sessions, setSessions] = useState<StudySession[]>([]);
+  const [statisticsData, setStatisticsData] = useState<StudyStatistics | null>(null);
   const [userName, setUserName] = useState("Student");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,13 +53,13 @@ export default function Dashboard() {
       const name = user?.name?.trim();
       setUserName(name || "Student");
 
-      if (!user?.id) {
+      if (!user) {
         setError("We couldn't find your signed-in profile. Please sign in again to sync your study data.");
         return;
       }
 
-      const savedSessions = await getStudySessions(user.id);
-      setSessions(savedSessions);
+      const savedStatistics = await getStudyStatistics();
+      setStatisticsData(savedStatistics);
       setHasLoaded(true);
       setError(null);
     } catch (loadError) {
@@ -107,70 +77,22 @@ export default function Dashboard() {
     }, [loadDashboard])
   );
 
-  const statistics = useMemo(() => {
-    const now = new Date();
-    const today = dateKey(now);
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-
-    const weekStart = new Date(todayStart);
-    weekStart.setDate(weekStart.getDate() - 6);
-
-    let totalMinutes = 0;
-    let todayMinutes = 0;
-    let todaySessions = 0;
-    let weeklyMinutes = 0;
-    let weeklySessions = 0;
-
-    const minutesByDay: Record<string, number> = {};
-
-    sessions.forEach((session) => {
-      const minutes = getSessionMinutes(session);
-      totalMinutes += minutes;
-
-      if (!session.startTime) return;
-      const start = new Date(session.startTime);
-      if (Number.isNaN(start.getTime())) return;
-
-      const key = dateKey(start);
-      if (key === today) {
-        todayMinutes += minutes;
-        todaySessions += 1;
-      }
-
-      if (start >= weekStart && start <= now) {
-        weeklyMinutes += minutes;
-        weeklySessions += 1;
-        minutesByDay[key] = (minutesByDay[key] || 0) + minutes;
-      }
-    });
-
-    const activity: DailyActivity[] = [];
-    for (let offset = 6; offset >= 0; offset -= 1) {
-      const day = new Date(todayStart);
-      day.setDate(todayStart.getDate() - offset);
-      activity.push({
-        key: dateKey(day),
-        label: day.toLocaleDateString(undefined, { weekday: "short" }),
-        minutes: minutesByDay[dateKey(day)] || 0,
-      });
-    }
-
-    return {
-      totalMinutes,
-      totalSessions: sessions.length,
-      todayMinutes,
-      todaySessions,
-      weeklyMinutes,
-      weeklySessions,
-      activity,
-    };
-  }, [sessions]);
+  const statistics: StudyStatistics = statisticsData ?? {
+    totalStudySessions: 0,
+    totalStudyMinutes: 0,
+    todayStudyMinutes: 0,
+    todaySessions: 0,
+    weeklyStudyMinutes: 0,
+    weeklySessions: 0,
+    currentStreak: 0,
+    dailyActivity: [],
+    subjectStats: [],
+  };
 
   const firstName = userName.split(/\s+/)[0] || "Student";
   const maxDailyMinutes = Math.max(
     1,
-    ...statistics.activity.map((day) => day.minutes)
+    ...statistics.dailyActivity.map((day) => day.minutes)
   );
 
   const refresh = () => {
@@ -246,7 +168,9 @@ export default function Dashboard() {
           </View>
           <Text style={styles.heroTitle}>Small steps.{ "\n" }Big progress.</Text>
           <Text style={styles.heroSubtitle}>
-            Make a little time for your goals today. Your next study session is a great place to start.
+            {hasLoaded
+              ? `You've studied ${formatMinutes(statistics.todayStudyMinutes)} today. Keep your momentum going.`
+              : "Make a little time for your goals today. Your next study session is a great place to start."}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -282,7 +206,7 @@ export default function Dashboard() {
               <Ionicons name="time-outline" size={20} color="#5B5CE2" />
             </View>
             <Text style={styles.statValue}>
-              {hasLoaded ? formatMinutes(statistics.totalMinutes) : "—"}
+              {hasLoaded ? formatMinutes(statistics.totalStudyMinutes) : "—"}
             </Text>
             <Text style={styles.statLabel}>Total study time</Text>
             <Text style={styles.statHint}>All sessions</Text>
@@ -292,7 +216,7 @@ export default function Dashboard() {
               <Ionicons name="book-outline" size={20} color="#0F766E" />
             </View>
             <Text style={styles.statValue}>
-              {hasLoaded ? statistics.totalSessions : "—"}
+              {hasLoaded ? statistics.totalStudySessions : "—"}
             </Text>
             <Text style={styles.statLabel}>Study sessions</Text>
             <Text style={styles.statHint}>Saved in your account</Text>
@@ -302,7 +226,7 @@ export default function Dashboard() {
               <Ionicons name="calendar-outline" size={20} color="#B45309" />
             </View>
             <Text style={styles.statValue}>
-              {hasLoaded ? formatMinutes(statistics.weeklyMinutes) : "—"}
+              {hasLoaded ? formatMinutes(statistics.weeklyStudyMinutes) : "—"}
             </Text>
             <Text style={styles.statLabel}>Last 7 days</Text>
             <Text style={styles.statHint}>
@@ -316,13 +240,29 @@ export default function Dashboard() {
               <Ionicons name="flash-outline" size={20} color="#7C3AED" />
             </View>
             <Text style={styles.statValue}>
-              {hasLoaded ? formatMinutes(statistics.todayMinutes) : "—"}
+              {hasLoaded ? formatMinutes(statistics.todayStudyMinutes) : "—"}
             </Text>
             <Text style={styles.statLabel}>Studied today</Text>
             <Text style={styles.statHint}>
               {hasLoaded
                 ? `${statistics.todaySessions} ${statistics.todaySessions === 1 ? "session" : "sessions"} today`
                 : "Loading activity"}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.streakBanner}>
+          <View style={styles.streakIcon}>
+            <Ionicons name="flame" size={20} color="#C2410C" />
+          </View>
+          <View style={styles.streakCopy}>
+            <Text style={styles.streakTitle}>
+              {hasLoaded ? `${statistics.currentStreak}-day study streak` : "Build your study streak"}
+            </Text>
+            <Text style={styles.streakSubtitle}>
+              {statistics.currentStreak > 0
+                ? "Consistency matters more than long sessions."
+                : "A little study time today is a great start."}
             </Text>
           </View>
         </View>
@@ -335,7 +275,7 @@ export default function Dashboard() {
             </View>
             <View style={styles.weekTotal}>
               <Text style={styles.weekTotalValue}>
-                {hasLoaded ? formatMinutes(statistics.weeklyMinutes) : "—"}
+                {hasLoaded ? formatMinutes(statistics.weeklyStudyMinutes) : "—"}
               </Text>
               <Text style={styles.weekTotalLabel}>THIS WEEK</Text>
             </View>
@@ -350,7 +290,7 @@ export default function Dashboard() {
             <Text style={styles.emptyActivityText}>
               Your study activity will appear here once your account is connected.
             </Text>
-          ) : statistics.totalSessions === 0 ? (
+          ) : statistics.totalStudySessions === 0 ? (
             <View style={styles.emptyActivity}>
               <View style={styles.emptyActivityIcon}>
                 <Ionicons name="bar-chart-outline" size={23} color="#5B5CE2" />
@@ -362,7 +302,7 @@ export default function Dashboard() {
             </View>
           ) : (
             <View style={styles.chart}>
-              {statistics.activity.map((day) => {
+              {statistics.dailyActivity.map((day) => {
                 const barHeight =
                   day.minutes > 0
                     ? Math.max(9, (day.minutes / maxDailyMinutes) * 76)
@@ -695,6 +635,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 5,
   },
+  streakBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FFEDD5",
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 15,
+    marginBottom: 22,
+  },
+  streakIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: "#FFEDD5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  streakCopy: { flex: 1 },
+  streakTitle: { color: "#9A3412", fontSize: 14, fontWeight: "800" },
+  streakSubtitle: { color: "#9A3412", fontSize: 11, lineHeight: 16, marginTop: 3 },
   activityCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 22,
