@@ -1,107 +1,882 @@
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import {
-  Pressable,
+  ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  Pressable,
 } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
+
+import { getCurrentUser } from "../../services/authService";
+import {
+  getStudySessions,
+  StudySession,
+} from "../../services/studySessionService";
+
+type DailyActivity = {
+  key: string;
+  label: string;
+  minutes: number;
+};
+
+function getSessionMinutes(session: StudySession): number {
+  const savedMinutes = Number(
+    session.durationMinutes ?? session.duration ?? 0
+  );
+
+  if (Number.isFinite(savedMinutes) && savedMinutes > 0) {
+    return Math.round(savedMinutes);
+  }
+
+  // Older sessions may have timestamps but no saved duration.
+  if (session.startTime && session.endTime) {
+    const start = new Date(session.startTime).getTime();
+    const end = new Date(session.endTime).getTime();
+
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return Math.round((end - start) / 60000);
+    }
+  }
+
+  return 0;
+}
+
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatMinutes(minutes: number): string {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+
+  if (hours === 0) return `${remainingMinutes}m`;
+  if (remainingMinutes === 0) return `${hours}h`;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 export default function Dashboard() {
+  const [sessions, setSessions] = useState<StudySession[]>([]);
+  const [userName, setUserName] = useState("Student");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      const user = await getCurrentUser();
+      const name = user?.name?.trim();
+      setUserName(name || "Student");
+
+      if (!user?.id) {
+        setError("We couldn't find your signed-in profile. Please sign in again to sync your study data.");
+        return;
+      }
+
+      const savedSessions = await getStudySessions(user.id);
+      setSessions(savedSessions);
+      setHasLoaded(true);
+      setError(null);
+    } catch (loadError) {
+      console.error("Failed to load dashboard statistics:", loadError);
+      setError("We couldn't refresh your study data. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadDashboard();
+    }, [loadDashboard])
+  );
+
+  const statistics = useMemo(() => {
+    const now = new Date();
+    const today = dateKey(now);
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - 6);
+
+    let totalMinutes = 0;
+    let todayMinutes = 0;
+    let todaySessions = 0;
+    let weeklyMinutes = 0;
+    let weeklySessions = 0;
+
+    const minutesByDay: Record<string, number> = {};
+
+    sessions.forEach((session) => {
+      const minutes = getSessionMinutes(session);
+      totalMinutes += minutes;
+
+      if (!session.startTime) return;
+      const start = new Date(session.startTime);
+      if (Number.isNaN(start.getTime())) return;
+
+      const key = dateKey(start);
+      if (key === today) {
+        todayMinutes += minutes;
+        todaySessions += 1;
+      }
+
+      if (start >= weekStart && start <= now) {
+        weeklyMinutes += minutes;
+        weeklySessions += 1;
+        minutesByDay[key] = (minutesByDay[key] || 0) + minutes;
+      }
+    });
+
+    const activity: DailyActivity[] = [];
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const day = new Date(todayStart);
+      day.setDate(todayStart.getDate() - offset);
+      activity.push({
+        key: dateKey(day),
+        label: day.toLocaleDateString(undefined, { weekday: "short" }),
+        minutes: minutesByDay[dateKey(day)] || 0,
+      });
+    }
+
+    return {
+      totalMinutes,
+      totalSessions: sessions.length,
+      todayMinutes,
+      todaySessions,
+      weeklyMinutes,
+      weeklySessions,
+      activity,
+    };
+  }, [sessions]);
+
+  const firstName = userName.split(/\s+/)[0] || "Student";
+  const maxDailyMinutes = Math.max(
+    1,
+    ...statistics.activity.map((day) => day.minutes)
+  );
+
+  const refresh = () => {
+    setRefreshing(true);
+    void loadDashboard();
+  };
+
   return (
     <View style={styles.screen}>
-      <View style={styles.appContainer}>
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <View><Text style={styles.greeting}>Good morning 👋</Text><Text style={styles.userName}>Student</Text></View>
-            <Pressable style={styles.profileButton} onPress={() => router.push("/tabs/profile")}><Text style={styles.profileLetter}>S</Text></Pressable>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            tintColor="#5B5CE2"
+            colors={["#5B5CE2"]}
+          />
+        }
+      >
+        <View style={styles.header}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.dateText}>
+              {new Date().toLocaleDateString(undefined, {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+              }).toUpperCase()}
+            </Text>
+            <Text style={styles.greeting}>{getGreeting()},</Text>
+            <Text style={styles.userName}>{firstName} ✨</Text>
           </View>
-
-          <View style={styles.welcomeSection}><Text style={styles.welcomeTitle}>Ready to study?</Text><Text style={styles.welcomeSubtitle}>Keep your focus and make progress today.</Text></View>
-
-          <View style={styles.progressCard}>
-            <View style={styles.progressHeader}><View><Text style={styles.progressLabel}>Today's Progress</Text><Text style={styles.progressNumber}>0%</Text></View><View style={styles.progressCircle}><Text style={styles.progressCircleText}>0%</Text></View></View>
-            <View style={styles.progressBarBackground}><View style={styles.progressBar} /></View>
-            <Text style={styles.progressFooter}>Start a study session to begin tracking your progress.</Text>
-          </View>
-
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}><View style={styles.statIconContainer}><Text style={styles.statIcon}>⏱</Text></View><Text style={styles.statNumber}>0</Text><Text style={styles.statLabel}>Study Hours</Text></View>
-            <View style={styles.statCard}><View style={styles.statIconContainer}><Text style={styles.statIcon}>✓</Text></View><Text style={styles.statNumber}>0</Text><Text style={styles.statLabel}>Sessions</Text></View>
-          </View>
-
-          <Text style={styles.sectionTitle}>Continue Studying</Text>
-          <Pressable style={styles.sessionCard} onPress={() => router.push("/tabs/sessions")}>
-            <View style={styles.sessionIcon}><Text style={styles.sessionIconText}>▶</Text></View>
-            <View style={styles.sessionInfo}><Text style={styles.sessionTitle}>Start a Study Session</Text><Text style={styles.sessionSubtitle}>Choose a subject and start learning</Text></View>
-            <Text style={styles.arrow}>›</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open your profile"
+            style={styles.profileButton}
+            onPress={() => router.push("/tabs/profile")}
+          >
+            <Text style={styles.profileLetter}>
+              {firstName.charAt(0).toUpperCase() || "S"}
+            </Text>
           </Pressable>
+        </View>
 
-          <Text style={styles.sectionTitle}>Study Together</Text>
-          <Pressable style={styles.collabCard} onPress={() => router.push("/tabs/friends")}>
-            <View style={styles.collabIcon}><Text style={styles.collabIconText}>👥</Text></View>
-            <View style={styles.sessionInfo}><Text style={styles.sessionTitle}>Friends & Study Rooms</Text><Text style={styles.sessionSubtitle}>Invite classmates and study together online</Text></View>
-            <Text style={styles.arrow}>›</Text>
-          </Pressable>
-
-          <Text style={styles.sectionTitle}>Quick Access</Text>
-          <View style={styles.quickGrid}>
-            <Pressable style={styles.quickCard} onPress={() => router.push("/tabs/subjects")}><View style={styles.quickIcon}><Text style={styles.quickIconText}>📚</Text></View><Text style={styles.quickTitle}>Subjects</Text><Text style={styles.quickSubtitle}>Manage subjects</Text></Pressable>
-            <Pressable style={styles.quickCard} onPress={() => router.push("/tabs/sessions")}><View style={styles.quickIcon}><Text style={styles.quickIconText}>⏱</Text></View><Text style={styles.quickTitle}>Sessions</Text><Text style={styles.quickSubtitle}>Track your study</Text></Pressable>
-            <Pressable style={styles.quickCard} onPress={() => router.push("/tabs/friends")}><View style={styles.quickIcon}><Text style={styles.quickIconText}>👥</Text></View><Text style={styles.quickTitle}>Friends</Text><Text style={styles.quickSubtitle}>Study together</Text></Pressable>
-            <Pressable style={styles.quickCard} onPress={() => router.push("/ai")}><View style={styles.quickIcon}><Text style={styles.quickIconText}>🤖</Text></View><Text style={styles.quickTitle}>AI Assistant</Text><Text style={styles.quickSubtitle}>Get study help</Text></Pressable>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Ionicons name="cloud-offline-outline" size={20} color="#B45309" />
+            <View style={styles.errorCopy}>
+              <Text style={styles.errorTitle}>Study data unavailable</Text>
+              <Text style={styles.errorText}>{error}</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setLoading(true);
+                  void loadDashboard();
+                }}
+                style={styles.retryButton}
+              >
+                <Text style={styles.retryText}>Try again</Text>
+              </Pressable>
+            </View>
           </View>
-          <View style={styles.bottomSpace} />
-        </ScrollView>
-      </View>
+        ) : null}
+
+        <View style={styles.heroCard}>
+          <View style={styles.heroTopRow}>
+            <View style={styles.heroBadge}>
+              <Ionicons name="sparkles" size={13} color="#D9F99D" />
+              <Text style={styles.heroBadgeText}>YOUR STUDY SPACE</Text>
+            </View>
+            <Ionicons name="sunny-outline" size={27} color="#D9F99D" />
+          </View>
+          <Text style={styles.heroTitle}>Small steps.{ "\n" }Big progress.</Text>
+          <Text style={styles.heroSubtitle}>
+            Make a little time for your goals today. Your next study session is a great place to start.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.primaryButton}
+            onPress={() => router.push("/study-session/create")}
+          >
+            <Ionicons name="play" size={15} color="#172033" />
+            <Text style={styles.primaryButtonText}>Start studying</Text>
+            <Ionicons name="arrow-forward" size={17} color="#172033" />
+          </Pressable>
+          <View pointerEvents="none" style={styles.heroOrb} />
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Your progress</Text>
+            <Text style={styles.sectionSubtitle}>Built from your saved study sessions</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open detailed statistics"
+            onPress={() => router.push("/tabs/statistics")}
+            style={styles.viewAllButton}
+          >
+            <Text style={styles.viewAllText}>Details</Text>
+            <Ionicons name="chevron-forward" size={15} color="#5B5CE2" />
+          </Pressable>
+        </View>
+
+        <View style={styles.statsGrid}>
+          <View style={[styles.statCard, styles.statCardPrimary]}>
+            <View style={styles.statIconPrimary}>
+              <Ionicons name="time-outline" size={20} color="#5B5CE2" />
+            </View>
+            <Text style={styles.statValue}>
+              {hasLoaded ? formatMinutes(statistics.totalMinutes) : "—"}
+            </Text>
+            <Text style={styles.statLabel}>Total study time</Text>
+            <Text style={styles.statHint}>All sessions</Text>
+          </View>
+          <View style={styles.statCard}>
+            <View style={styles.statIconSoft}>
+              <Ionicons name="book-outline" size={20} color="#0F766E" />
+            </View>
+            <Text style={styles.statValue}>
+              {hasLoaded ? statistics.totalSessions : "—"}
+            </Text>
+            <Text style={styles.statLabel}>Study sessions</Text>
+            <Text style={styles.statHint}>Saved in your account</Text>
+          </View>
+          <View style={styles.statCard}>
+            <View style={styles.statIconSoft}>
+              <Ionicons name="calendar-outline" size={20} color="#B45309" />
+            </View>
+            <Text style={styles.statValue}>
+              {hasLoaded ? formatMinutes(statistics.weeklyMinutes) : "—"}
+            </Text>
+            <Text style={styles.statLabel}>Last 7 days</Text>
+            <Text style={styles.statHint}>
+              {hasLoaded
+                ? `${statistics.weeklySessions} ${statistics.weeklySessions === 1 ? "session" : "sessions"}`
+                : "Loading activity"}
+            </Text>
+          </View>
+          <View style={styles.statCard}>
+            <View style={styles.statIconSoft}>
+              <Ionicons name="flash-outline" size={20} color="#7C3AED" />
+            </View>
+            <Text style={styles.statValue}>
+              {hasLoaded ? formatMinutes(statistics.todayMinutes) : "—"}
+            </Text>
+            <Text style={styles.statLabel}>Studied today</Text>
+            <Text style={styles.statHint}>
+              {hasLoaded
+                ? `${statistics.todaySessions} ${statistics.todaySessions === 1 ? "session" : "sessions"} today`
+                : "Loading activity"}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.activityCard}>
+          <View style={styles.activityHeader}>
+            <View>
+              <Text style={styles.activityTitle}>Weekly activity</Text>
+              <Text style={styles.activitySubtitle}>Your last seven days</Text>
+            </View>
+            <View style={styles.weekTotal}>
+              <Text style={styles.weekTotalValue}>
+                {hasLoaded ? formatMinutes(statistics.weeklyMinutes) : "—"}
+              </Text>
+              <Text style={styles.weekTotalLabel}>THIS WEEK</Text>
+            </View>
+          </View>
+
+          {loading && !hasLoaded ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator size="small" color="#5B5CE2" />
+              <Text style={styles.loadingText}>Loading your progress…</Text>
+            </View>
+          ) : !hasLoaded ? (
+            <Text style={styles.emptyActivityText}>
+              Your study activity will appear here once your account is connected.
+            </Text>
+          ) : statistics.totalSessions === 0 ? (
+            <View style={styles.emptyActivity}>
+              <View style={styles.emptyActivityIcon}>
+                <Ionicons name="bar-chart-outline" size={23} color="#5B5CE2" />
+              </View>
+              <Text style={styles.emptyActivityTitle}>Your progress starts here</Text>
+              <Text style={styles.emptyActivityText}>
+                Complete your first study session and your activity will show up here.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.chart}>
+              {statistics.activity.map((day) => {
+                const barHeight =
+                  day.minutes > 0
+                    ? Math.max(9, (day.minutes / maxDailyMinutes) * 76)
+                    : 5;
+                const isToday = day.key === dateKey(new Date());
+
+                return (
+                  <View key={day.key} style={styles.chartColumn}>
+                    <View style={styles.barTrack}>
+                      <View
+                        style={[
+                          styles.bar,
+                          {
+                            height: barHeight,
+                            backgroundColor: isToday ? "#5B5CE2" : "#BFC1FF",
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={[styles.chartLabel, isToday && styles.chartLabelToday]}>
+                      {day.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Make it a good study day</Text>
+            <Text style={styles.sectionSubtitle}>Everything you need, one tap away</Text>
+          </View>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          style={styles.featureCard}
+          onPress={() => router.push("/tabs/subjects")}
+        >
+          <View style={[styles.featureIcon, { backgroundColor: "#EDEBFF" }]}>
+            <Ionicons name="library-outline" size={22} color="#5B5CE2" />
+          </View>
+          <View style={styles.featureCopy}>
+            <Text style={styles.featureTitle}>Your subjects</Text>
+            <Text style={styles.featureSubtitle}>Organize what you're learning</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8B8FA3" />
+        </Pressable>
+
+        <View style={styles.quickGrid}>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.quickCard}
+            onPress={() => router.push("/tabs/friends")}
+          >
+            <View style={[styles.quickIcon, { backgroundColor: "#DDF7EF" }]}>
+              <Ionicons name="people-outline" size={21} color="#0F766E" />
+            </View>
+            <Text style={styles.quickTitle}>Study together</Text>
+            <Text style={styles.quickSubtitle}>Friends & rooms</Text>
+            <Ionicons name="arrow-up-right" size={18} color="#8B8FA3" style={styles.quickArrow} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.quickCard}
+            onPress={() => router.push("/ai")}
+          >
+            <View style={[styles.quickIcon, { backgroundColor: "#FCE7F3" }]}>
+              <Ionicons name="sparkles-outline" size={21} color="#BE185D" />
+            </View>
+            <Text style={styles.quickTitle}>AI study helper</Text>
+            <Text style={styles.quickSubtitle}>Get unstuck faster</Text>
+            <Ionicons name="arrow-up-right" size={18} color="#8B8FA3" style={styles.quickArrow} />
+          </Pressable>
+        </View>
+
+        <Text style={styles.footerText}>One focused session at a time. You've got this.</Text>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#EEF1F6" },
-  appContainer: { flex: 1, width: "100%", maxWidth: 480, alignSelf: "center", backgroundColor: "#F8F9FC" },
-  scrollView: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingTop: 25 },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 25 },
-  greeting: { fontSize: 14, color: "#7B8190", marginBottom: 3 },
-  userName: { fontSize: 25, fontWeight: "800", color: "#151923" },
-  profileButton: { width: 46, height: 46, borderRadius: 23, backgroundColor: "#151923", justifyContent: "center", alignItems: "center" },
-  profileLetter: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
-  welcomeSection: { marginBottom: 20 },
-  welcomeTitle: { fontSize: 21, fontWeight: "800", color: "#151923" },
-  welcomeSubtitle: { fontSize: 14, color: "#7B8190", marginTop: 5, lineHeight: 20 },
-  progressCard: { backgroundColor: "#151923", borderRadius: 22, padding: 22, marginBottom: 18 },
-  progressHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  progressLabel: { color: "#B8BDC8", fontSize: 13, fontWeight: "600" },
-  progressNumber: { color: "#FFFFFF", fontSize: 36, fontWeight: "800", marginTop: 5 },
-  progressCircle: { width: 64, height: 64, borderRadius: 32, borderWidth: 5, borderColor: "#555B68", justifyContent: "center", alignItems: "center" },
-  progressCircleText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
-  progressBarBackground: { height: 7, backgroundColor: "#343944", borderRadius: 10, marginTop: 18, overflow: "hidden" },
-  progressBar: { width: "0%", height: "100%", backgroundColor: "#FFFFFF", borderRadius: 10 },
-  progressFooter: { color: "#9EA4B1", fontSize: 12, marginTop: 12, lineHeight: 18 },
-  statsRow: { flexDirection: "row", gap: 12, marginBottom: 8 },
-  statCard: { flex: 1, backgroundColor: "#FFFFFF", borderRadius: 18, padding: 17, borderWidth: 1, borderColor: "#E8EAF0" },
-  statIconContainer: { width: 36, height: 36, borderRadius: 10, backgroundColor: "#F0F1F5", justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  statIcon: { fontSize: 17 },
-  statNumber: { fontSize: 25, fontWeight: "800", color: "#151923" },
-  statLabel: { fontSize: 12, color: "#7B8190", marginTop: 3 },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: "#151923", marginTop: 25, marginBottom: 12 },
-  sessionCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#FFFFFF", borderRadius: 18, padding: 17, borderWidth: 1, borderColor: "#E8EAF0" },
-  collabCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#F0F0FF", borderRadius: 18, padding: 17, borderWidth: 1, borderColor: "#DDD9FF" },
-  sessionIcon: { width: 48, height: 48, borderRadius: 14, backgroundColor: "#151923", justifyContent: "center", alignItems: "center" },
-  collabIcon: { width: 48, height: 48, borderRadius: 14, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center" },
-  sessionIconText: { color: "#FFFFFF", fontSize: 17 },
-  collabIconText: { fontSize: 22 },
-  sessionInfo: { flex: 1, marginLeft: 14 },
-  sessionTitle: { fontSize: 15, fontWeight: "700", color: "#151923" },
-  sessionSubtitle: { fontSize: 12, color: "#7B8190", marginTop: 4 },
-  arrow: { fontSize: 28, color: "#A0A5AF", marginLeft: 8 },
-  quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  quickCard: { width: "48%", backgroundColor: "#FFFFFF", borderRadius: 18, padding: 17, borderWidth: 1, borderColor: "#E8EAF0" },
-  quickIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: "#F0F1F5", justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  quickIconText: { fontSize: 20 },
-  quickTitle: { fontSize: 14, fontWeight: "700", color: "#151923" },
-  quickSubtitle: { fontSize: 11, color: "#858B98", marginTop: 4 },
-  bottomSpace: { height: 30 },
+  screen: {
+    flex: 1,
+    backgroundColor: "#F6F7FB",
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 112,
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 22,
+  },
+  headerCopy: {
+    flex: 1,
+  },
+  dateText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.25,
+    color: "#8B8FA3",
+    marginBottom: 9,
+  },
+  greeting: {
+    color: "#666B80",
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  userName: {
+    color: "#191B2D",
+    fontSize: 29,
+    fontWeight: "800",
+    letterSpacing: -0.7,
+    marginTop: 1,
+  },
+  profileButton: {
+    width: 49,
+    height: 49,
+    borderRadius: 17,
+    backgroundColor: "#E5E7FF",
+    borderWidth: 1,
+    borderColor: "#D7D9FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 16,
+  },
+  profileLetter: {
+    color: "#4F46E5",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 11,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FED7AA",
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  errorCopy: {
+    flex: 1,
+  },
+  errorTitle: {
+    color: "#92400E",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  errorText: {
+    color: "#92400E",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  retryButton: {
+    alignSelf: "flex-start",
+    paddingVertical: 7,
+    marginTop: 2,
+  },
+  retryText: {
+    color: "#92400E",
+    fontWeight: "800",
+    fontSize: 12,
+    textDecorationLine: "underline",
+  },
+  heroCard: {
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "#202644",
+    borderRadius: 26,
+    padding: 22,
+    marginBottom: 27,
+  },
+  heroTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  heroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  heroBadgeText: {
+    color: "#F3F4F6",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    color: "#FFFFFF",
+    fontSize: 31,
+    lineHeight: 36,
+    fontWeight: "800",
+    letterSpacing: -0.7,
+    marginTop: 24,
+  },
+  heroSubtitle: {
+    color: "#D1D5E5",
+    fontSize: 13,
+    lineHeight: 20,
+    maxWidth: 310,
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  primaryButton: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    backgroundColor: "#D9F99D",
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 13,
+    zIndex: 1,
+  },
+  primaryButtonText: {
+    color: "#172033",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  heroOrb: {
+    position: "absolute",
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    borderWidth: 28,
+    borderColor: "rgba(217,249,157,0.08)",
+    right: -88,
+    bottom: -90,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 13,
+  },
+  sectionTitle: {
+    color: "#202238",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: -0.25,
+  },
+  sectionSubtitle: {
+    color: "#85899D",
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  viewAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingVertical: 8,
+    paddingLeft: 8,
+  },
+  viewAllText: {
+    color: "#5B5CE2",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 11,
+    marginBottom: 22,
+  },
+  statCard: {
+    width: "48%",
+    flexGrow: 1,
+    minWidth: 135,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 19,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#EAEBF3",
+  },
+  statCardPrimary: {
+    backgroundColor: "#F0F0FF",
+    borderColor: "#DEDEFF",
+  },
+  statIconPrimary: {
+    width: 37,
+    height: 37,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  statIconSoft: {
+    width: 37,
+    height: 37,
+    borderRadius: 12,
+    backgroundColor: "#F5F6FA",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  statValue: {
+    color: "#202238",
+    fontSize: 25,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  statLabel: {
+    color: "#4D5269",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 5,
+  },
+  statHint: {
+    color: "#9397A9",
+    fontSize: 10,
+    marginTop: 5,
+  },
+  activityCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#EAEBF3",
+    marginBottom: 27,
+  },
+  activityHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  activityTitle: {
+    color: "#202238",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  activitySubtitle: {
+    color: "#8B8FA3",
+    fontSize: 11,
+    marginTop: 4,
+  },
+  weekTotal: {
+    alignItems: "flex-end",
+  },
+  weekTotalValue: {
+    color: "#5B5CE2",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  weekTotalLabel: {
+    color: "#A0A3B3",
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    marginTop: 3,
+  },
+  loadingState: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    paddingVertical: 35,
+  },
+  loadingText: {
+    color: "#85899D",
+    fontSize: 12,
+  },
+  emptyActivity: {
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 26,
+  },
+  emptyActivityIcon: {
+    width: 45,
+    height: 45,
+    borderRadius: 15,
+    backgroundColor: "#F0F0FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 11,
+  },
+  emptyActivityTitle: {
+    color: "#202238",
+    fontSize: 13,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  emptyActivityText: {
+    color: "#85899D",
+    fontSize: 11,
+    lineHeight: 17,
+    textAlign: "center",
+    marginTop: 6,
+  },
+  chart: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    marginTop: 23,
+    paddingTop: 2,
+  },
+  chartColumn: {
+    flex: 1,
+    alignItems: "center",
+    gap: 9,
+  },
+  barTrack: {
+    width: 19,
+    height: 82,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "#F5F5FC",
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  bar: {
+    width: "100%",
+    borderRadius: 10,
+  },
+  chartLabel: {
+    color: "#A0A3B3",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  chartLabelToday: {
+    color: "#5B5CE2",
+  },
+  featureCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 13,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#EAEBF3",
+    marginBottom: 12,
+  },
+  featureIcon: {
+    width: 47,
+    height: 47,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featureCopy: {
+    flex: 1,
+  },
+  featureTitle: {
+    color: "#202238",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  featureSubtitle: {
+    color: "#85899D",
+    fontSize: 11,
+    marginTop: 4,
+  },
+  quickGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  quickCard: {
+    flex: 1,
+    position: "relative",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#EAEBF3",
+    minHeight: 143,
+  },
+  quickIcon: {
+    width: 41,
+    height: 41,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 13,
+  },
+  quickTitle: {
+    color: "#202238",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  quickSubtitle: {
+    color: "#85899D",
+    fontSize: 10,
+    marginTop: 5,
+  },
+  quickArrow: {
+    position: "absolute",
+    right: 12,
+    top: 13,
+  },
+  footerText: {
+    textAlign: "center",
+    color: "#A0A3B3",
+    fontSize: 11,
+    marginTop: 24,
+    marginBottom: 4,
+  },
 });
