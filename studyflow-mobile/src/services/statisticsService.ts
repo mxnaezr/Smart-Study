@@ -29,8 +29,8 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(number) && number > 0 ? number : 0;
 };
 
-export async function getStudyStatistics(userId: number): Promise<StudyStatistics> {
-  const data = await apiRequest(`/api/statistics/user/${userId}`);
+export async function getStudyStatistics(): Promise<StudyStatistics> {
+  const data = await apiRequest("/api/statistics/me");
 
   return {
     totalStudySessions: toNumber(data?.totalStudySessions),
