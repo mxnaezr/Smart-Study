@@ -150,13 +150,12 @@ public class StatisticsController {
     }
 
     @GetMapping
-    public ResponseEntity<?> getStatistics() {
-        Map<String, Object> statistics = Map.of(
-                "totalStudySessions", 0,
-                "totalStudyMinutes", 0,
-                "completedTasks", 0,
-                "currentStreak", 0
-        );
-        return ResponseEntity.ok(statistics);
+    public ResponseEntity<?> getStatistics(@RequestParam(required = false) Long userId) {
+        if (userId == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Provide userId to retrieve study statistics."
+            ));
+        }
+        return getUserStatistics(userId);
     }
 }
